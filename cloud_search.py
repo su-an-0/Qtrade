@@ -16,6 +16,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from tqdm import tqdm
 import logging
 import argparse
+import json
 
 # # 检查并设置分布式训练环境
 # rank = os.environ.get('RANK', -1)
@@ -594,38 +595,48 @@ def evaluate_model(model, test_data, price_scaler, args, device):
         high_true_scaled = true_scaled[:, 1]
         low_true_scaled = true_scaled[:, 2]
         
+        # 计算评估指标
         metrics = {
             'high': {
-                'mae': mean_absolute_error(high_true_scaled, high_pred_scaled),
-                'rmse': np.sqrt(mean_squared_error(high_true_scaled, high_pred_scaled)),
-                'mape': np.mean(np.abs((high_true_scaled - high_pred_scaled) / high_true_scaled)) * 100
+                'mae': float(mean_absolute_error(high_true_scaled, high_pred_scaled)),
+                'rmse': float(np.sqrt(mean_squared_error(high_true_scaled, high_pred_scaled))),
+                'mape': float(np.mean(np.abs((high_true_scaled - high_pred_scaled) / high_true_scaled)) * 100)
             },
             'low': {
-                'mae': mean_absolute_error(low_true_scaled, low_pred_scaled),
-                'rmse': np.sqrt(mean_squared_error(low_true_scaled, low_pred_scaled)),
-                'mape': np.mean(np.abs((low_true_scaled - low_pred_scaled) / low_true_scaled)) * 100
+                'mae': float(mean_absolute_error(low_true_scaled, low_pred_scaled)),
+                'rmse': float(np.sqrt(mean_squared_error(low_true_scaled, low_pred_scaled))),
+                'mape': float(np.mean(np.abs((low_true_scaled - low_pred_scaled) / low_true_scaled)) * 100)
             },
             'overall': {
-                'mae': (mean_absolute_error(high_true_scaled, high_pred_scaled) + 
-                       mean_absolute_error(low_true_scaled, low_pred_scaled)) / 2,
-                'rmse': (np.sqrt(mean_squared_error(high_true_scaled, high_pred_scaled)) +
-                        np.sqrt(mean_squared_error(low_true_scaled, low_pred_scaled))) / 2,
-                'mape': (np.mean(np.abs((high_true_scaled - high_pred_scaled) / high_true_scaled)) +
-                        np.mean(np.abs((low_true_scaled - low_pred_scaled) / low_true_scaled))) * 50
+                'mae': float((mean_absolute_error(high_true_scaled, high_pred_scaled) + 
+                       mean_absolute_error(low_true_scaled, low_pred_scaled)) / 2),
+                'rmse': float((np.sqrt(mean_squared_error(high_true_scaled, high_pred_scaled)) +
+                        np.sqrt(mean_squared_error(low_true_scaled, low_pred_scaled))) / 2),
+                'mape': float((np.mean(np.abs((high_true_scaled - high_pred_scaled) / high_true_scaled)) +
+                        np.mean(np.abs((low_true_scaled - low_pred_scaled) / low_true_scaled))) * 50)
             }
         }
         
-        # 保存评估指标到文件（阿里云AutoML需要）
-        with open(f"{args['metric_filepath']}/metrics.txt", "w") as f:
-            f.write(f"high_mae: {metrics['high']['mae']:.4f}\n")
-            f.write(f"high_rmse: {metrics['high']['rmse']:.4f}\n")
-            f.write(f"high_mape: {metrics['high']['mape']:.2f}\n")
-            f.write(f"low_mae: {metrics['low']['mae']:.4f}\n")
-            f.write(f"low_rmse: {metrics['low']['rmse']:.4f}\n")
-            f.write(f"low_mape: {metrics['low']['mape']:.2f}\n")
-            f.write(f"overall_mae: {metrics['overall']['mae']:.4f}\n")
-            f.write(f"overall_rmse: {metrics['overall']['rmse']:.4f}\n")
-            f.write(f"overall_mape: {metrics['overall']['mape']:.2f}\n")
+        # 创建输出目录（如果不存在）
+        Path(args['metric_filepath']).mkdir(parents=True, exist_ok=True)
+        
+        # 保存为JSON格式（阿里云AutoML推荐格式）
+        metric_path = f"{args['metric_filepath']}/metrics.json"
+        with open(metric_path, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, ensure_ascii=False, indent=4)
+        
+        # 同时输出一个简洁版指标，只包含主要评估指标（供平台快速识别）
+        simple_metrics = {
+            "MAE": metrics['overall']['mae'],
+            "RMSE": metrics['overall']['rmse'],
+            "MAPE": metrics['overall']['mape'],
+            # 阿里云通常需要一个主要指标作为优化目标
+            "default_metric": metrics['overall']['mae']
+        }
+        
+        simple_metric_path = f"{args['metric_filepath']}/default_metric.json"
+        with open(simple_metric_path, "w", encoding="utf-8") as f:
+            json.dump(simple_metrics, f, ensure_ascii=False)
         
         return {
             'high_pred': high_pred_scaled,
@@ -636,6 +647,7 @@ def evaluate_model(model, test_data, price_scaler, args, device):
         }
     else:
         return None
+
 
 
 # --------------------------
@@ -884,3 +896,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+'''
+    python3 /root/code/cloud_search.py \
+    --seq_len=${seq_len} \
+    --ewt_components=${ewt_components} \
+    --ewt_dim=${ewt_dim} \
+    --batch_size=${batch_size} \
+    --epochs=${epochs} \
+    --lr=${lr} \
+    --train_ratio=${train_ratio} \
+    --save_model=/root/code/model/model_${exp_id}_${trial_id} \
+    --metric_filepath=/root/code/metric/metric_${exp_id}_${trial_id} \ '''
